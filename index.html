@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="sk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#080808">
+<title>Sklad QR</title>
+<style>
+:root{color-scheme:dark;background:#080808;color:#f5f5f5;font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+*{box-sizing:border-box}body{margin:0;background:#080808;color:#f5f5f5}main{max-width:720px;margin:auto;padding:18px 14px calc(28px + env(safe-area-inset-bottom))}
+header{display:flex;align-items:center;gap:12px;margin:8px 0 20px}.logo{width:50px;height:50px;border:1px solid #444;border-radius:14px;display:grid;place-items:center;background:#171717}h1{font-size:25px;margin:0}header p{margin:3px 0 0;color:#aaa;font-size:13px}
+.card{background:#141414;border:1px solid #303030;border-radius:18px;padding:16px;margin:14px 0}.head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}h2{font-size:17px;margin:0}.muted,.count{color:#aaa;font-size:13px}
+button,input{font:inherit}button{border:1px solid #444;border-radius:12px;padding:12px 14px;background:#1d1d1d;color:#f5f5f5;font-weight:650;cursor:pointer}button:disabled{opacity:.4;cursor:not-allowed}.primary{background:#f2f2f2;color:#111;border-color:#f2f2f2}.danger{color:#ffb4ab}.full{width:100%}.actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}.actions .full{grid-column:1/-1}
+#videoWrap{display:none;overflow:hidden;border-radius:14px;background:#000;margin-top:12px}video{width:100%;display:block;max-height:50vh;object-fit:cover}
+#status{font-size:14px;color:#bbb;margin:12px 0 0}.manual{display:flex;gap:8px;margin-top:12px}input{width:100%;min-width:0;background:#090909;color:#f5f5f5;border:1px solid #444;border-radius:11px;padding:12px}.notice{font-size:13px;color:#aaa;margin-top:10px;overflow-wrap:anywhere}.good{color:#b9f6ca}.bad{color:#ffb4ab}
+.list{display:flex;flex-direction:column;gap:8px}.item{display:flex;align-items:center;gap:10px;padding:11px;background:#0c0c0c;border:1px solid #282828;border-radius:12px}.number{width:30px;height:30px;border-radius:9px;background:#252525;display:grid;place-items:center;color:#ddd;font-size:13px;flex-shrink:0}.code{overflow-wrap:anywhere;flex:1;font:14px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace}.remove{padding:7px 10px;color:#aaa}.empty{text-align:center;padding:24px 8px;color:#aaa;font-size:14px}.small{font-size:12px;color:#999;margin-top:12px}footer{text-align:center;color:#777;font-size:12px;padding:10px}
+</style>
+</head>
+<body>
+<main>
+<header><div class="logo" aria-hidden="true">▦</div><div><h1>Sklad QR</h1><p>Skener skladových kódov — bez ukladania zoznamov</p></div></header>
+<section class="card">
+ <div class="head"><h2>Načítať QR kód</h2><span class="count">Pripravené</span></div>
+ <div class="actions"><button class="primary full" id="start">▦ Spustiť skener</button><button id="stop" class="full" disabled>Zastaviť skener</button></div>
+ <div id="videoWrap"><video id="video" playsinline muted></video></div>
+ <p id="status" aria-live="polite">Stlač „Spustiť skener“. Kamera funguje v podporovanom prehliadači cez HTTPS.</p>
+ <div class="manual"><input id="manual" placeholder="Alebo zadaj / vlož číslo kódu" autocomplete="off"><button id="add">Pridať</button></div>
+ <div id="notice" class="notice" aria-live="polite"></div>
+</section>
+<section class="card">
+ <div class="head"><h2>Naskenované kódy</h2><span id="count" class="count">0 položiek</span></div>
+ <div id="list" class="list"><div class="empty">Zatiaľ tu nie sú žiadne kódy.</div></div>
+ <div class="actions" style="margin-top:14px"><button id="copy">Kopírovať zoznam</button><button id="clear" class="danger">Vymazať zoznam</button><button id="email" class="primary full">✉ Odoslať na e-mail</button></div>
+ <p class="small">Zoznam sa neukladá do pamäte prehliadača. Po obnovení alebo zatvorení stránky sa vymaže. Duplicitné kódy sa nepridávajú.</p>
+</section>
+<section class="card">
+ <div class="head"><h2>Príjemca e-mailu</h2></div>
+ <input id="emailTo" type="email" placeholder="Adresa príjemcu (voliteľné)" autocomplete="email">
+ <p class="small">Po stlačení odoslania sa otvorí e-mailová aplikácia s pripraveným textovým zoznamom. Správu odošli v e-mailovej aplikácii.</p>
+</section>
+<footer>Bez účtu • Bez lokálneho ukladania • Tmavý režim</footer>
+</main>
+<script>
+(function(){
+'use strict';
+const $=id=>document.getElementById(id);
+let items=[],stream=null,detector=null,scanning=false,raf=0,lastValue='',lastAt=0;
+function say(t,kind){$('notice').className='notice '+(kind||'');$('notice').textContent=t}
+function render(){
+ $('count').textContent=items.length+' '+(items.length===1?'položka':items.length>1&&items.length<5?'položky':'položiek');
+ if(!items.length){$('list').innerHTML='<div class="empty">Zatiaľ tu nie sú žiadne kódy.</div>'}
+ else $('list').innerHTML=items.map((it,i)=>'<div class="item"><span class="number">'+(i+1)+'</span><div class="code">'+escapeHtml(it)+'</div><button class="remove" data-i="'+i+'" aria-label="Odstrániť kód">✕</button></div>').join('');
+ $('copy').disabled=!items.length;$('email').disabled=!items.length;
+}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function addCode(raw){let code=String(raw||'').trim();if(!code){say('QR kód je prázdny.','bad');return false}if(items.includes(code)){say('Tento kód už je v zozname. Duplicitný kód sa nepridal.','bad');return false}items.push(code);render();say('Kód bol pridaný.','good');return true}
+$('add').addEventListener('click',()=>{if(addCode($('manual').value))$('manual').value=''});
+$('manual').addEventListener('keydown',e=>{if(e.key==='Enter')$('add').click()});
+$('list').addEventListener('click',e=>{let b=e.target.closest('[data-i]');if(b){items.splice(Number(b.dataset.i),1);render();say('Položka odstránená.')}});
+$('clear').addEventListener('click',()=>{if(items.length&&confirm('Vymazať celý aktuálny zoznam?')){items=[];render();say('Zoznam vymazaný.')}});
+function listText(){return 'ZOZNAM NASKENOVANÝCH QR KÓDOV\nDátum: '+new Date().toLocaleString('sk-SK')+'\nPočet kódov: '+items.length+'\n\n'+items.map((x,i)=>(i+1)+'. '+x).join('\n')}
+$('copy').addEventListener('click',async()=>{try{await navigator.clipboard.writeText(listText());say('Zoznam skopírovaný.','good')}catch(e){say('Kopírovanie nie je dostupné v tomto prehliadači.','bad')}});
+$('email').addEventListener('click',()=>{if(!items.length)return;let to=$('emailTo').value.trim();if(to&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)){say('Skontroluj e-mailovú adresu.','bad');return}location.href='mailto:'+encodeURIComponent(to)+'?subject='+encodeURIComponent('Sklad QR – zoznam kódov ('+items.length+')')+'&body='+encodeURIComponent(listText())});
+async function start(){
+ if(!window.isSecureContext||!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){$('status').textContent='Kamera je blokovaná pri lokálnom content:// súbore. Nahraj HTML na HTTPS hosting a otvor webovú adresu v Chrome.';say('Na kameru je potrebná HTTPS adresa.','bad');return}
+ if(!('BarcodeDetector' in window)){ $('status').textContent='Tento prehliadač nepodporuje vstavaný QR skener. Skús aktuálny Chrome pre Android alebo zadaj kód ručne.';say('QR skener nie je podporovaný týmto prehliadačom.','bad');return}
+ try{
+  let formats=await BarcodeDetector.getSupportedFormats();if(!formats.includes('qr_code'))throw Error('QR nepodporované');
+  detector=new BarcodeDetector({formats:['qr_code']});
+  stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'}}});
+  $('video').srcObject=stream;await $('video').play();$('videoWrap').style.display='block';scanning=true;$('start').disabled=true;$('stop').disabled=false;$('status').textContent='Namier kameru na QR kód.';say('Skener je aktívny.','good');loop();
+ }catch(e){stop();$('status').textContent=e.name==='NotAllowedError'?'Prístup ku kamere bol zamietnutý. Povoľ kameru pre túto webovú stránku v Chrome.':'Kameru sa nepodarilo spustiť. Skontroluj povolenia a skús znova.';say('Skener sa nepodarilo spustiť.','bad')}
+}
+async function loop(){if(!scanning)return;try{if($('video').readyState>=2){let codes=await detector.detect($('video'));if(codes.length){let v=codes[0].rawValue,now=Date.now();if(v&&(v!==lastValue||now-lastAt>1800)){lastValue=v;lastAt=now;addCode(v)}}}}catch(e){}if(scanning)raf=requestAnimationFrame(loop)}
+function stop(){scanning=false;if(raf)cancelAnimationFrame(raf);if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}$('video').srcObject=null;$('videoWrap').style.display='none';$('start').disabled=false;$('stop').disabled=true}
+$('start').addEventListener('click',start);$('stop').addEventListener('click',()=>{stop();$('status').textContent='Skener vypnutý. Aktuálny zoznam zostáva otvorený, ale neukladá sa.'});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&scanning)stop()});render();
+})();
+</script>
+</body>
+</html>
